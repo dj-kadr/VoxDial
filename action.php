@@ -2,6 +2,9 @@
 // action.php — Переключение статусов обзвона
 require_once __DIR__ . '/config.php';
 
+header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+header('Pragma: no-cache');
+
 try {
     $pdo = db_pdo('dialer');
 } catch (PDOException $e) {
@@ -25,5 +28,5 @@ if ($id > 0 && !empty($action)) {
     }
 }
 
-header("Location: index.php");
+header("Location: index.php?_=" . time(), true, 303);
 exit;
