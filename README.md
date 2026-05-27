@@ -57,18 +57,18 @@ exten => s,1,NoOp(--- VoxDial: Анализ статуса недозвона. �
 
  same => n(error),System(php /var/www/html/dialer/callback.php ${LEAD_ID} 5 0)
  same => n,Hangup()
-
+```
 
 2. /etc/asterisk/manager_custom.conf
-[dialer_user]
+```[dialer_user]
 secret = password
 permit = 127.0.0.1/255.255.255.0
 read = system,call,log,verbose,command,agent,user,config,dtmf,reporting,cdr,dialplan,originate
 write = system,call,log,verbose,command,agent,user,config,dtmf,reporting,cdr,dialplan,originate
-
+```
 
 3.Створення бази данних 
-
+```
 -- 1. Создаем базу данных dialer, если она еще не создана
 CREATE DATABASE IF NOT EXISTS `dialer` 
 CHARACTER SET utf8mb4 
@@ -129,3 +129,28 @@ CREATE TABLE IF NOT EXISTS `leads` (
     ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
+Створюємо демона 
+vi /etc/systemd/system/dialer.service
+```
+[Unit]
+Description=VoxDial Autodialer Daemon
+After=network.target mariadb.service asterisk.service
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/bin/php /var/www/html/dialer/dialer.php
+StandardOutput=append:/var/log/dialer.log
+StandardError=append:/var/log/dialer.log
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+```
+Перезавантажуємо конфігурацію системних служб
+```systemctl daemon-reload```
+Додаємо сервіс в автозавантаження системи:
+```systemctl enable dialer.service```
+Запускаємо 
+```systemctl start dialer.service```
