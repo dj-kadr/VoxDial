@@ -59,8 +59,15 @@ exten => s,1,NoOp(--- VoxDial: Анализ статуса недозвона. �
  same => n,Hangup()
 
 
+2. /etc/asterisk/manager_custom.conf
+[dialer_user]
+secret = password
+permit = 127.0.0.1/255.255.255.0
+read = system,call,log,verbose,command,agent,user,config,dtmf,reporting,cdr,dialplan,originate
+write = system,call,log,verbose,command,agent,user,config,dtmf,reporting,cdr,dialplan,originate
 
-2.Створення бази данних 
+
+3.Створення бази данних 
 
 -- 1. Создаем базу данных dialer, если она еще не создана
 CREATE DATABASE IF NOT EXISTS `dialer` 
