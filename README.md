@@ -128,6 +128,15 @@ CREATE TABLE IF NOT EXISTS `leads` (
     ON DELETE CASCADE 
     ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+--Блеклист
+CREATE TABLE IF NOT EXISTS dialer.blacklist (
+     id INT AUTO_INCREMENT PRIMARY KEY,
+     phone VARCHAR(20) NOT NULL UNIQUE,
+     description VARCHAR(255) NULL,
+     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+ );
+
 ```
 Створюємо демона 
 vi /etc/systemd/system/dialer.service
