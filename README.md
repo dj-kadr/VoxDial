@@ -1,6 +1,6 @@
 # VoxDial
 Автоматичний обзвон в чергу або IVR зі статистикою 
-
+```
 1 /etc/asterisk/extensions_custom.conf
 [dialer-outbound]
 ; Контекст виклику клієнта. Якщо він не підняв трубку,
@@ -121,3 +121,4 @@ CREATE TABLE IF NOT EXISTS `leads` (
     ON DELETE CASCADE 
     ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
