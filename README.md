@@ -159,6 +159,12 @@ WantedBy=multi-user.target
 ```
 Перезавантажуємо конфігурацію системних служб
 ```systemctl daemon-reload```
+
+додаємо права на перезапуск служби з вебу
+```
+visudo 
+asterisk ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart dialer.service
+```
 Додаємо сервіс в автозавантаження системи:
 ```systemctl enable dialer.service```
 Запускаємо 
