@@ -8,7 +8,7 @@ date_default_timezone_set('Europe/Kyiv');
 $db_host = 'localhost';
 $db_name = 'dialer'; 
 $db_user = 'root';      
-$db_pass = 'IT-Premium';        
+$db_pass = 'Pass';        
 
 try {
     $pdo = new PDO("mysql:host=$db_host;dbname=$db_name;charset=utf8", $db_user, $db_pass);
