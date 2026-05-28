@@ -1,5 +1,5 @@
 <?php
-// dialer.php — Мультипоточная версия: одновременный запуск множества кампаний (Queue / IVR)
+// dialer.php — Мультипоточная версия: одновременный запуск множества кампаний (Queue / IVR) с поддержкой Стоп-листа
 require_once __DIR__ . '/config.php';
 
 set_time_limit(0);
@@ -36,7 +36,7 @@ if (strpos($response, "Response: Success") === false) {
     die("[" . date('Y-m-d H:i:s') . "] AMI Authentication Failed!\n");
 }
 
-echo "[" . date('Y-m-d H:i:s') . "] Демон VoxDial (МУЛЬТИПОТОК) успешно запущен.\n";
+echo "[" . date('Y-m-d H:i:s') . "] Демон VoxDial (МУЛЬТИПОТОК + СТОП-ЛИСТ) успешно запущен.\n";
 stream_set_blocking($socket, false);
 
 $last_debug_time = 0;
@@ -96,7 +96,7 @@ while (true) {
             continue; 
         }
 
-        // 3. Считаем активные каналы именно этой кампании в локальной базе
+        // 3. Считаем active каналы именно этой кампании в локальной базе
         $stmt_active = $pdo->prepare("SELECT COUNT(*) FROM leads WHERE campaign_id = ? AND status = 1");
         $stmt_active->execute([$campaign_id]);
         $current_active_channels = (int)$stmt_active->fetchColumn();
@@ -147,11 +147,26 @@ while (true) {
             continue;
         }
 
-        // 6. Стреляем пачкой звонков в AMI
+        // 6. Стреляем пачкой звонков в AMI (С предварительным Стоп-лист анализом)
         foreach ($leads_to_dial as $lead) {
             $lead_id = (int)$lead['id'];
             $phone   = trim($lead['phone']);
 
+            // 🛑 ПРОВЕРКА НОМЕРА В СТОП-ЛИСТЕ ПЕРЕД ИНИЦИАЛИЗАЦИЕЙ ВЫЗОВА
+            $stmt_bl = $pdo->prepare("SELECT COUNT(*) FROM blacklist WHERE phone = ?");
+            $stmt_bl->execute([$phone]);
+            $is_blacklisted = (int)$stmt_bl->fetchColumn();
+
+            if ($is_blacklisted > 0) {
+                // Если номер найден в черном списке — жестко маркируем его как Пропущен/Сброс (5)
+                $stmt_skip = $pdo->prepare("UPDATE leads SET status = 5, updated_at = NOW() WHERE id = ?");
+                $stmt_skip->execute([$lead_id]);
+                
+                echo "[" . date('Y-m-d H:i:s') . "] [СТОП-ЛИСТ] Номер {$phone} (Лид #{$lead_id}) найден в черном списке. Пропущен без набора.\n";
+                continue; // Полностью отсекаем выполнение Originate и переходим к следующему лиду
+            }
+
+            // Если номера в стоп-листе нет — переводим в статус "Звоним" и шлем пакет
             $stmt_up = $pdo->prepare("UPDATE leads SET status = 1, updated_at = NOW() WHERE id = ?");
             $stmt_up->execute([$lead_id]);
 

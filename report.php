@@ -1,5 +1,5 @@
 <?php
-// report.php — Финальная версия с защитой от наложения старых тестов по времени updated_at
+// report.php — Финальная версия с защитой от наложения старых тестов и поддержкой Стоп-листа
 require_once __DIR__ . '/config.php';
 
 try {
@@ -34,6 +34,8 @@ function getStatusBadge($status_id) {
         case 4: return '<span class="badge bg-danger px-3 py-1"><i class="fa-solid fa-circle-xmark me-1"></i>Нет ответа</span>';
         case 5: return '<span class="badge bg-dark text-white px-3 py-1"><i class="fa-solid fa-triangle-exclamation me-1"></i>Сброс</span>';
         case 6: return '<span class="badge bg-danger-subtle text-danger border border-danger-subtle px-3 py-1 fw-bold"><i class="fa-solid fa-phone-slash me-1"></i>Отвечен/Сброс</span>';
+        // НОВЫЙ БЕЙДЖ ДЛЯ ОТОБРАЖЕНИЯ СТОП-ЛИСТА
+        case 7: return '<span class="badge bg-danger text-white border border-danger px-3 py-1 fw-bold" style="background-color: #dc3545 !important;"><i class="fa-solid fa-user-slash me-1"></i>Стоп-лист</span>';
         default: return '<span class="badge bg-light text-muted">Неизвестно</span>';
     }
 }
@@ -65,6 +67,7 @@ function getStatusBadge($status_id) {
                 <li><a href="create.php" class="nav-link text-white mt-2"><i class="fa-solid fa-plus me-2"></i>Создать обзвон</a></li>
                 <li><a href="agents.php" class="nav-link text-white mt-2"><i class="fa-solid fa-users me-2"></i>Операторы</a></li>
                 <li><a href="stats.php" class="nav-link text-white mt-2"><i class="fa-solid fa-chart-column me-2"></i>Статистика</a></li>
+                <li><a href="blacklist.php" class="nav-link text-white mt-2"><i class="fa-solid fa-user-slash me-2"></i>Стоп-лист</a></li>
             </ul>
         </div>
 
@@ -107,15 +110,15 @@ function getStatusBadge($status_id) {
                                 <tr><td colspan="7" class="text-center text-muted py-4">В этой кампании пока нет номеров.</td></tr>
                             <?php else: ?>
                                 <?php foreach ($leads as $lead): 
-                                    $final_status = 4; // По умолчанию "Нет ответа"
+                                    $final_status = 4; 
                                     $final_duration = 0;
                                     $final_hold = 0;
                                     $final_agent = '—';
 
-                                    if ((int)$lead['status'] !== 0) {
+                                    $db_status = (int)$lead['status'];
+
+                                    if ($db_status !== 0) {
                                         $unique_accountcode = "dialer-lead-" . (int)$lead['id'];
-                                        
-                                        // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Отсекаем старые логи! Берем записи только созданные в районе или ПОСЛЕ updated_at лида (минус 2 минуты для буфера)
                                         $time_threshold = date('Y-m-d H:i:s', strtotime($lead['updated_at']) - 120);
 
                                         $query = "SELECT disposition, duration, billsec, channel, dstchannel, dst, src 
@@ -177,19 +180,24 @@ function getStatusBadge($status_id) {
                                                 $final_agent = '—';
 
                                                 if ($has_busy) {
-                                                    $final_status = 5; // Сброс
+                                                    $final_status = 5; 
                                                 } elseif ($has_no_answer) {
-                                                    $final_status = ($max_duration >= 25) ? 3 : 4; // 3 - Занято, 4 - Нет ответа
+                                                    $final_status = ($max_duration >= 25) ? 3 : 4; 
                                                 }
                                             }
                                         } else {
-                                            $final_status = 4;
+                                            // АНАЛИЗ СТОП-ЛИСТА: Если логов нет, но статус равен 5 — выводим бейдж Стоп-лист (7)
+                                            if ($db_status === 5) {
+                                                $final_status = 7;
+                                            } else {
+                                                $final_status = 4;
+                                            }
                                             $final_duration = 0;
                                             $final_hold = 0;
                                             $final_agent = '—';
                                         }
                                     } else {
-                                        $final_status = 0; // В очереди
+                                        $final_status = 0; 
                                     }
                                 ?>
                                 <tr>

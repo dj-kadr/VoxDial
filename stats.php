@@ -206,7 +206,8 @@ function formatTime($seconds) {
                 <li><a href="create.php" class="nav-link text-white mt-2"><i class="fa-solid fa-plus me-2"></i>Создать обзвон</a></li>
                 <li><a href="agents.php" class="nav-link text-white mt-2"><i class="fa-solid fa-users me-2"></i>Операторы</a></li>
                 <li><a href="stats.php" class="nav-link text-white active bg-info mt-2"><i class="fa-solid fa-chart-column me-2"></i>Статистика</a></li>
-            </ul>
+            	<li><a href="blacklist.php" class="nav-link text-white mt-2"><i class="fa-solid fa-user-slash me-2"></i>Стоп-лист</a></li>
+	    </ul>
         </div>
 
         <div class="col-md-10 p-4">

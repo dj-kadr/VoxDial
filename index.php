@@ -1,5 +1,5 @@
 <?php
-// index.php — Главная панель управления (Дашборд) с точной синхронизацией CDR и статусом службы
+// index.php — Главная панель управления (Дашборд) с точной синхронизацией CDR, статусом службы и Стоп-листом
 require_once __DIR__ . '/config.php';
 
 header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
@@ -8,7 +8,7 @@ header('Pragma: no-cache');
 header('Expires: 0');
 
 try {
-    $pdo = db_pdo('dialer');
+    $pdo = db_pdo('dialer'); // Используем твои родные функции конфигурации
     $pdo_cdr = db_pdo('cdr');
 } catch (PDOException $e) {
     die("Ошибка подключения к БД: " . $e->getMessage());
@@ -61,7 +61,8 @@ foreach ($campaigns_raw as $c) {
         'busy' => 0,
         'no_answer' => 0,
         'error' => 0,
-        'resp_drop' => 0 
+        'resp_drop' => 0,
+        'blacklisted' => 0 // Новое поле Стоп-листа
     ];
 
     foreach ($leads as $lead) {
@@ -74,6 +75,20 @@ foreach ($campaigns_raw as $c) {
 
         $unique_accountcode = "dialer-lead-" . (int)$lead['id'];
         $time_threshold = date('Y-m-d H:i:s', strtotime($lead['updated_at']) - 120);
+
+        // КРИТИЧЕСКИЙ ТРИГГЕР: Если статус равен 5, проверяем наличие записи в Asterisk CDR
+        if ($db_status === 5) {
+            $query_check = "SELECT COUNT(*) FROM asteriskcdrdb.cdr WHERE accountcode = :accountcode AND calldate >= :time_threshold";
+            $stmt_check = $pdo_cdr->prepare($query_check);
+            $stmt_check->execute(['accountcode' => $unique_accountcode, 'time_threshold' => $time_threshold]);
+            $cdr_exists = (int)$stmt_check->fetchColumn();
+
+            if ($cdr_exists === 0) {
+                // В CDR пусто, а статус 5 — лид отфильтрован Стоп-листом до вызова
+                $stats['blacklisted']++;
+                continue;
+            }
+        }
 
         $query_cdr = "SELECT disposition, duration, billsec FROM asteriskcdrdb.cdr 
                       WHERE accountcode = :accountcode AND calldate >= :time_threshold";
@@ -159,19 +174,26 @@ $total_campaigns = count($campaigns);
                 <li><a href="create.php" class="nav-link text-white mt-2"><i class="fa-solid fa-plus me-2"></i>Создать обзвон</a></li>
                 <li><a href="agents.php" class="nav-link text-white mt-2"><i class="fa-solid fa-users me-2"></i>Операторы</a></li>
                 <li><a href="stats.php" class="nav-link text-white mt-2"><i class="fa-solid fa-chart-column me-2"></i>Статистика</a></li>
+                <li><a href="blacklist.php" class="nav-link text-white mt-2"><i class="fa-solid fa-user-slash me-2"></i>Стоп-лист</a></li>
             </ul>
         </div>
 
         <div class="col-md-10 p-4">
-            <div class="d-flex justify-content-between align-items-center mb-4">
-                <div>
-                    <h2>Панель управления автообзвоном</h2>
-                    <div class="mt-1">Статус службы демона: <?= $service_badge ?></div>
-                </div>
-                <a href="create.php" class="btn btn-info text-white fw-bold"><i class="fa-solid fa-plus me-2"></i>Новая кампания</a>
-            </div>
+	   <div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h2>Панель управления автообзвоном</h2>
+        <div class="mt-1 d-flex align-items-center gap-2">
+            <span>Статус службы демона:</span> 
+            <?= $service_badge ?>
+            <a href="restart_service.php" class="btn btn-sm btn-warning fw-bold text-dark ms-2 shadow-sm" onclick="return confirm('Вы уверены, что хотите перезапустить службу автообзвона?')">
+                <i class="fa-solid fa-arrows-rotate me-1"></i> Перезапустить робота
+            </a>
+        </div>
+    </div>
+    	<a href="create.php" class="btn btn-info text-white fw-bold"><i class="fa-solid fa-plus me-2"></i>Новая кампания</a>
+	</div>           
+ 
 
-            <!-- ВЕРХНИЕ КАРТОЧКИ СТАТИСТИКИ (Теперь их 4 вместо 2) -->
             <div class="row mb-4 g-3">
                 <div class="col-md-3">
                     <div class="card bg-white p-3 d-flex flex-row align-items-center h-100">
@@ -183,10 +205,7 @@ $total_campaigns = count($campaigns);
                 <div class="col-md-3">
                     <div class="card bg-white p-3 d-flex flex-row align-items-center h-100">
                         <div class="rounded-circle bg-success-subtle text-success p-3 fs-3 me-3"><i class="fa-solid fa-play"></i></div>
-                        <div>
-                            <h3 class="mb-0 fw-bold text-success"><?= $running_campaigns_count ?></h3>
-                            <small class="text-muted">Запущено сейчас</small>
-                        </div>
+                        <div><h3 class="mb-0 fw-bold text-success"><?= $running_campaigns_count ?></h3><small class="text-muted">Запущено сейчас</small></div>
                     </div>
                 </div>
 
@@ -199,20 +218,15 @@ $total_campaigns = count($campaigns);
 
                 <div class="col-md-3">
                     <div class="card bg-white p-3 d-flex flex-row align-items-center h-100">
-                        <div class="rounded-circle p-3 fs-3 me-3 <?= $service_status === 'active' ? 'bg-success-subtle text-success' : 'bg-danger-subtle text-danger' ?>">
-                            <i class="fa-solid fa-server"></i>
-                        </div>
+                        <div class="rounded-circle p-3 fs-3 me-3 <?= $service_status === 'active' ? 'bg-success-subtle text-success' : 'bg-danger-subtle text-danger' ?>"><i class="fa-solid fa-server"></i></div>
                         <div>
-                            <h5 class="mb-0 fw-bold <?= $service_status === 'active' ? 'text-success' : 'text-danger' ?>">
-                                <?= $service_status === 'active' ? 'ONLINE' : 'OFFLINE' ?>
-                            </h5>
+                            <h5 class="mb-0 fw-bold <?= $service_status === 'active' ? 'text-success' : 'text-danger' ?>"><?= $service_status === 'active' ? 'ONLINE' : 'OFFLINE' ?></h5>
                             <small class="text-muted">Робот dialer.service</small>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <!-- ТАБЛИЦА КАМПАНИЙ -->
             <div class="card p-4">
                 <h5 class="mb-3 fw-bold text-secondary">Текущие кампании обзвона</h5>
                 <div class="table-responsive">
@@ -264,7 +278,8 @@ $total_campaigns = count($campaigns);
                                     <span class="text-warning fw-bold me-2" title="Занято"><i class="fa-solid fa-circle-minus"></i> <?= (int)$c['busy'] ?></span>
                                     <span class="text-danger fw-bold me-2" title="Нет ответа"><i class="fa-solid fa-circle-xmark"></i> <?= (int)$c['no_answer'] ?></span>
                                     <span class="text-dark fw-bold me-2" title="Сбой / Сброс"><i class="fa-solid fa-triangle-exclamation"></i> <?= (int)$c['error'] ?></span>
-                                    <span class="text-danger-emphasis fw-bold" title="Отвечен/Сброс (Короткий)"><i class="fa-solid fa-phone-slash"></i> <?= (int)$c['resp_drop'] ?></span>
+                                    <span class="text-danger-emphasis fw-bold me-2" title="Отвечен/Сброс (Короткий)"><i class="fa-solid fa-phone-slash"></i> <?= (int)$c['resp_drop'] ?></span>
+                                    <span class="text-danger fw-bold" title="Пропущено по Стоп-листу" style="color: #dc3545 !important;"><i class="fa-solid fa-user-slash"></i> <?= (int)$c['blacklisted'] ?></span>
                                 </td>
                                 <td>
                                     <div class="btn-group btn-group-sm">
