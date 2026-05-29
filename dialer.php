@@ -48,7 +48,48 @@ while (true) {
 
     $show_debug = (time() - $last_debug_time >= 10);
     if ($show_debug) $last_debug_time = time();
+    // =========================================================================
+    // ⏰ АВТОМАТИЧЕСКИЙ ПЛАНИРОВЩИК: КОНТРОЛЬ ВРЕМЕНИ СТАРТА И ПАУЗЫ
+    // =========================================================================
+    static $last_scheduler_check = 0;
+    
+    if (time() - $last_scheduler_check >= 30) {
+        $last_scheduler_check = time();
+        $current_time = date('H:i:00'); // Текущее время сервера с округлением до минут
 
+        // 1. Ищем кампании, которым ПОРА СТАРТОВАТЬ (они на паузе (0), работают по расписанию и время пришло)
+        $stmt_sched_start = $pdo->prepare("
+            SELECT id, name FROM campaigns 
+            WHERE status = 0 
+              AND start_immediately = 0 
+              AND scheduled_start_time <= :current_time 
+              AND (scheduled_pause_time IS NULL OR scheduled_pause_time > :current_time)
+        ");
+        $stmt_sched_start->execute(['current_time' => $current_time]);
+        $campaigns_to_start = $stmt_sched_start->fetchAll(PDO::FETCH_ASSOC);
+
+        foreach ($campaigns_to_start as $c_to_start) {
+            $pdo->prepare("UPDATE campaigns SET status = 1 WHERE id = ?")->execute([(int)$c_to_start['id']]);
+            echo "[" . date('Y-m-d H:i:s') . "] [ПЛАНИРОВЩИК] Кампания [{$c_to_start['name']}] автоматически ВКЛЮЧЕНА по расписанию.\n";
+        }
+
+        // 2. Ищем кампании, которым ПОРА НА ПАУЗУ (они активны (1), работают по расписанию и время вышло)
+        $stmt_sched_pause = $pdo->prepare("
+            SELECT id, name FROM campaigns 
+            WHERE status = 1 
+              AND start_immediately = 0 
+              AND scheduled_pause_time IS NOT NULL 
+              AND :current_time >= scheduled_pause_time
+        ");
+        $stmt_sched_pause->execute(['current_time' => $current_time]);
+        $campaigns_to_pause = $stmt_sched_pause->fetchAll(PDO::FETCH_ASSOC);
+
+        foreach ($campaigns_to_pause as $c_to_pause) {
+            $pdo->prepare("UPDATE campaigns SET status = 0 WHERE id = ?")->execute([(int)$c_to_pause['id']]);
+            echo "[" . date('Y-m-d H:i:s') . "] [ПЛАНИРОВЩИК] Кампания [{$c_to_pause['name']}] автоматически поставлена на ПАУЗУ по расписанию.\n";
+        }
+    }
+    // =========================================================================
     // ЗАГРУЖАЕМ ВСЕ АКТИВНЫЕ КАМПАНИИ (Убрали LIMIT 1)
     $stmt_camp = $pdo->prepare("SELECT * FROM campaigns WHERE status = :status");
     $stmt_camp->execute(['status' => $statuses['active']]);

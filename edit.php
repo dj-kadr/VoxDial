@@ -1,5 +1,5 @@
 <?php
-// edit.php — Страница редактирования параметров кампании
+// edit.php — Страница редактирования параметров кампании с поддержкой Планировщика
 require_once __DIR__ . '/config.php';
 
 $campaign_id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
@@ -21,6 +21,11 @@ if (!$campaign) {
 
 $dest_type = isset($campaign['destination_type']) ? $campaign['destination_type'] : 'queue';
 $dest_val = !empty($campaign['destination_value']) ? $campaign['destination_value'] : $campaign['queue_num'];
+
+// Настройки планировщика
+$start_immediately = isset($campaign['start_immediately']) ? (int)$campaign['start_immediately'] : 1;
+$scheduled_start_time = !empty($campaign['scheduled_start_time']) ? substr($campaign['scheduled_start_time'], 0, 5) : '';
+$scheduled_pause_time = !empty($campaign['scheduled_pause_time']) ? substr($campaign['scheduled_pause_time'], 0, 5) : '';
 ?>
 <!DOCTYPE html>
 <html lang="ru">
@@ -47,6 +52,7 @@ $dest_val = !empty($campaign['destination_value']) ? $campaign['destination_valu
                 <li><a href="create.php" class="nav-link text-white mt-2"><i class="fa-solid fa-plus me-2"></i>Создать обзвон</a></li>
                 <li><a href="agents.php" class="nav-link text-white mt-2"><i class="fa-solid fa-users me-2"></i>Операторы</a></li>
                 <li><a href="stats.php" class="nav-link text-white mt-2"><i class="fa-solid fa-chart-column me-2"></i>Статистика</a></li>
+                <li><a href="blacklist.php" class="nav-link text-white mt-2"><i class="fa-solid fa-user-slash me-2"></i>Стоп-лист</a></li>
             </ul>
         </div>
 
@@ -57,7 +63,7 @@ $dest_val = !empty($campaign['destination_value']) ? $campaign['destination_valu
                 <p class="text-muted">Кампания: <strong><?= htmlspecialchars($campaign['name']) ?></strong> (<?= $dest_type === 'ivr' ? '🤖 IVR: ' : '🎧 Очередь: ' ?><?= htmlspecialchars($dest_val) ?>)</p>
             </div>
 
-            <div class="card p-4 col-lg-8">
+            <div class="card p-4 col-lg-8 mb-5">
                 <form action="update_campaign.php" method="POST">
                     <input type="hidden" name="id" value="<?= $campaign['id'] ?>">
 
@@ -74,7 +80,8 @@ $dest_val = !empty($campaign['destination_value']) ? $campaign['destination_valu
 
                     <hr class="my-4">
 
-                    <div class="row g-3">
+                    <!-- БЛОК ПАРАМЕТРОВ СКОРОСТИ -->
+                    <div class="row g-3 mb-4">
                         <div class="col-md-6">
                             <label class="form-label fw-bold text-dark">Лимит каналов (макс. одновременных)</label>
                             <div class="input-group">
@@ -121,6 +128,36 @@ $dest_val = !empty($campaign['destination_value']) ? $campaign['destination_valu
                         </div>
                     </div>
 
+                    <hr class="my-4">
+
+                    <!-- БЛОК ПЛАНИРОВЩИКА В РЕДАКТИРОВАНИИ -->
+                    <div class="card p-3 bg-light border-0">
+                        <h5 class="fw-bold mb-3 text-secondary" style="font-size: 1.05rem;"><i class="fa-solid fa-calendar-clock text-info me-2"></i>Планировщик автозапуска и паузы</h5>
+                        
+                        <div class="form-check form-switch mb-3">
+                            <input class="form-check-input" type="checkbox" name="start_immediately" id="startImmediately" value="1" <?= $start_immediately === 1 ? 'checked' : '' ?>>
+                            <label class="form-check-label fw-bold text-dark" for="startImmediately">Игнорировать расписание (Управление вручную / Немедленно)</label>
+                        </div>
+
+                        <div class="row g-3 <?= $start_immediately === 1 ? 'd-none' : '' ?>" id="schedulerFields">
+                            <div class="col-md-6">
+                                <label class="form-label small fw-bold text-muted">Время автоматического запуска (каждый день)</label>
+                                <div class="input-group">
+                                    <span class="input-group-text"><i class="fa-solid fa-play text-success"></i></span>
+                                    <input type="time" name="scheduled_start_time" class="form-control" value="<?= htmlspecialchars($scheduled_start_time) ?>">
+                                </div>
+                            </div>
+
+                            <div class="col-md-6">
+                                <label class="form-label small fw-bold text-muted">Время автоматической паузы (каждый день)</label>
+                                <div class="input-group">
+                                    <span class="input-group-text"><i class="fa-solid fa-pause text-warning"></i></span>
+                                    <input type="time" name="scheduled_pause_time" class="form-control" value="<?= htmlspecialchars($scheduled_pause_time) ?>">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     <div class="mt-4 pt-2 d-flex justify-content-end">
                         <a href="index.php" class="btn btn-light me-2 fw-bold">Отмена</a>
                         <button type="submit" class="btn btn-info text-white fw-bold">
@@ -134,5 +171,15 @@ $dest_val = !empty($campaign['destination_value']) ? $campaign['destination_valu
     </div>
 </div>
 
+<script>
+    document.getElementById('startImmediately').addEventListener('change', function() {
+        const schedulerFields = document.getElementById('schedulerFields');
+        if (this.checked) {
+            schedulerFields.classList.add('d-none');
+        } else {
+            schedulerFields.classList.remove('d-none');
+        }
+    });
+</script>
 </body>
 </html>

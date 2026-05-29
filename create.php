@@ -1,13 +1,12 @@
 <?php
-// Доступы к базам данных
+// create.php — Создание кампании автообзвона с интеграцией Планировщика
 require_once __DIR__ . '/config.php';
 
 $asterisk_queues = [];
 $asterisk_trunks = [];
-$asterisk_ivrs = []; // Массив для IVR
+$asterisk_ivrs = []; 
 
 try {
-    // Подключаемся напрямую к MySQL FreePBX
     $db = db_pdo('asterisk');
     
     // 1. Выбираем очереди
@@ -22,7 +21,7 @@ try {
         $asterisk_trunks[] = $row;
     }
 
-    // 3. АВТОМАТИЧЕСКИ ВЫГРЕБАЕМ IVR МЕНЮ ДЛЯ НОВОГО ФУНКЦИОНАЛА
+    // 3. Выбираем IVR меню
     $stmt_ivrs = $db->query("SELECT id, name FROM ivr_details ORDER BY name ASC");
     while ($row = $stmt_ivrs->fetch(PDO::FETCH_ASSOC)) {
         $asterisk_ivrs[] = $row;
@@ -59,8 +58,8 @@ try {
                 <li><a href="create.php" class="nav-link text-white active bg-info mt-2"><i class="fa-solid fa-plus me-2"></i>Создать обзвон</a></li>
                 <li><a href="agents.php" class="nav-link text-white mt-2"><i class="fa-solid fa-users me-2"></i>Операторы</a></li>
                 <li><a href="stats.php" class="nav-link text-white mt-2"><i class="fa-solid fa-chart-column me-2"></i>Статистика</a></li>
-            	<li><a href="blacklist.php" class="nav-link text-white mt-2"><i class="fa-solid fa-user-slash me-2"></i>Стоп-лист</a></li>
-	    </ul>
+                <li><a href="blacklist.php" class="nav-link text-white mt-2"><i class="fa-solid fa-user-slash me-2"></i>Стоп-лист</a></li>
+            </ul>
         </div>
 
         <div class="col-md-8 p-4 mx-auto">
@@ -69,7 +68,7 @@ try {
                 <h2 class="mt-2">Импорт базы и создание кампании</h2>
             </div>
 
-            <div class="card p-4">
+            <div class="card p-4 shadow-sm border-0 mb-5">
                 <form action="upload.php" method="POST" enctype="multipart/form-data">
                     
                     <div class="mb-3">
@@ -115,11 +114,11 @@ try {
                         </div>
                     </div>
 
-                    <div class="row mb-3">
+                    <div class="row mb-4">
                         <div class="col-md-6" id="queue_selector_container">
                             <label class="form-label fw-bold text-success"><i class="fa-solid fa-headset me-1"></i>Очередь Asterisk (Queue)</label>
                             <select name="queue_num" id="queue_num" class="form-select">
-                                <option value="" disabled selected>Выберите активную очередь...</option>
+                                <option value="" disabled selected>Выберите active очередь...</option>
                                 <?php foreach ($asterisk_queues as $queue): ?>
                                     <option value="<?= htmlspecialchars($queue[0]) ?>">
                                         Очередь <?= htmlspecialchars($queue[0]) ?> (<?= htmlspecialchars($queue[1]) ?>)
@@ -153,6 +152,33 @@ try {
                         </div>
                     </div>
 
+                    <div class="card p-3 bg-light border-0 mb-4" style="border-radius: 8px;">
+                        <h5 class="fw-bold mb-3 text-secondary" style="font-size: 1.05rem;"><i class="fa-solid fa-calendar-clock text-info me-2"></i>Планировщик автозапуска и паузы</h5>
+                        
+                        <div class="form-check form-switch mb-3">
+                            <input class="form-check-input" type="checkbox" name="start_immediately" id="startImmediately" value="1" checked>
+                            <label class="form-check-label fw-bold text-dark" for="startImmediately">Начать обзвон немедленно после создания (Управление вручную)</label>
+                        </div>
+
+                        <div class="row g-3 d-none" id="schedulerFields">
+                            <div class="col-md-6">
+                                <label class="form-label small fw-bold text-muted">Время автоматического запуска (каждый день)</label>
+                                <div class="input-group">
+                                    <span class="input-group-text"><i class="fa-solid fa-play text-success"></i></span>
+                                    <input type="time" name="scheduled_start_time" class="form-control">
+                                </div>
+                            </div>
+
+                            <div class="col-md-6">
+                                <label class="form-label small fw-bold text-muted">Время автоматической паузы (каждый день)</label>
+                                <div class="input-group">
+                                    <span class="input-group-text"><i class="fa-solid fa-pause text-warning"></i></span>
+                                    <input type="time" name="scheduled_pause_time" class="form-control">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     <div class="mb-4">
                         <label class="form-label fw-bold">Файл с номерами телефонов</label>
                         <div class="file-drop-area" id="drop-area">
@@ -166,7 +192,7 @@ try {
 
                     <div class="d-grid">
                         <button type="submit" class="btn btn-info btn-lg text-white fw-bold">
-                            <i class="fa-solid fa-cloud-arrow-up me-2"></i> Создать и запустить импорт
+                            <i class="fa-solid fa-cloud-arrow-up me-2"></i> Создать и сохранить кампанию
                         </button>
                     </div>
 
@@ -177,7 +203,6 @@ try {
 </div>
 
 <script>
-    // Родной скрипт загрузки файлов
     const dropArea = document.getElementById('drop-area');
     const fileInput = document.getElementById('file-input');
     const fileNameDiv = document.getElementById('file-name');
@@ -189,7 +214,16 @@ try {
         }
     });
 
-    // Динамическое переключение Черг и IVR
+    // Интерактивное скрытие/отображение полей времени планировщика
+    document.getElementById('startImmediately').addEventListener('change', function() {
+        const schedulerFields = document.getElementById('schedulerFields');
+        if (this.checked) {
+            schedulerFields.classList.add('d-none');
+        } else {
+            schedulerFields.classList.remove('d-none');
+        }
+    });
+
     function toggleDestFields() {
         const destType = document.getElementById('destination_type').value;
         const queueContainer = document.getElementById('queue_selector_container');
@@ -212,7 +246,6 @@ try {
         }
     }
     
-    // Запускаем проверку при старте, чтобы проставить требуемые валидации
     toggleDestFields();
 </script>
 </body>
