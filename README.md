@@ -136,7 +136,13 @@ CREATE TABLE IF NOT EXISTS dialer.blacklist (
      description VARCHAR(255) NULL,
      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
  );
-
+-- додаємо планувальник
+mysql -u root -p'password' -e "
+ALTER TABLE dialer.campaigns 
+ADD COLUMN start_immediately TINYINT(1) NOT NULL DEFAULT 1,
+ADD COLUMN scheduled_start_time TIME NULL,
+ADD COLUMN scheduled_pause_time TIME NULL;
+"
 ```
 Створюємо демона 
 vi /etc/systemd/system/dialer.service
