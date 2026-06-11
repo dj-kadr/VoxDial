@@ -170,6 +170,7 @@ WantedBy=multi-user.target
 ```
 visudo 
 asterisk ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart dialer.service
+asterisk ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart asterisk
 ```
 Додаємо сервіс в автозавантаження системи:
 ```systemctl enable dialer.service```
