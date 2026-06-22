@@ -1,63 +1,63 @@
 <?php
-// update_campaign.php — Обработчик сохранения измененных параметров кампании и планировщика
+// update_campaign.php — Обработчик сохранения измененных параметров кампании
 require_once __DIR__ . '/config.php';
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    try {
-        $pdo = db_pdo('dialer');
-    } catch (PDOException $e) {
-        die("Ошибка подключения к БД: " . $e->getMessage());
-    }
-
-    $id = (int)$_POST['id'];
-    $channel_limit = (int)$_POST['channel_limit'];
-    $ring_time = (int)$_POST['ring_time'];
-    $min_success_duration = (int)$_POST['min_success_duration'];
-    $max_retries = (int)$_POST['max_retries'];
-    $retry_time = (int)$_POST['retry_time'];
-
-    // Сбор параметров планировщика
-    $start_immediately = isset($_POST['start_immediately']) ? 1 : 0;
-    $scheduled_start_time = (!empty($_POST['scheduled_start_time'])) ? $_POST['scheduled_start_time'] . ':00' : null;
-    $scheduled_pause_time = (!empty($_POST['scheduled_pause_time'])) ? $_POST['scheduled_pause_time'] . ':00' : null;
-
-    if ($id > 0) {
-        $sql = "UPDATE campaigns SET 
-                    channel_limit = ?, 
-                    ring_time = ?, 
-                    min_success_duration = ?, 
-                    max_retries = ?, 
-                    retry_time = ?,
-                    start_immediately = ?,
-                    scheduled_start_time = ?,
-                    scheduled_pause_time = ?
-                WHERE id = ?";
-        
-        $stmt = $pdo->prepare($sql);
-        $stmt->execute([
-            $channel_limit,
-            $ring_time,
-            $min_success_duration,
-            $max_retries,
-            $retry_time,
-            $start_immediately,
-            $scheduled_start_time,
-            $scheduled_pause_time,
-            $id
-        ]);
-        
-        // Дополнительно: Если администратор переключил кампанию в режим "По расписанию" прямо сейчас,
-        // и текущее время сервера находится вне рабочего окна расписания,
-        // ставим статус кампании на 0 (Пауза), чтобы демон её не набирал.
-        if ($start_immediately === 0 && !empty($scheduled_start_time) && !empty($scheduled_pause_time)) {
-            $current_time = date('H:i:00');
-            if ($current_time < $scheduled_start_time || $current_time >= $scheduled_pause_time) {
-                $pdo->prepare("UPDATE campaigns SET status = 0 WHERE id = ?")->execute([$id]);
-            }
-        }
-    }
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    die("Ошибка: Неверный метод запроса.");
 }
 
-// Возвращаем администратора на дашборд
-header("Location: index.php");
-exit;
+$id = isset($_POST['id']) ? (int)$_POST['id'] : 0;
+$trunk_id = isset($_POST['trunk_id']) ? (int)$_POST['trunk_id'] : 0; // ЧИТАЕМ ТРАНК ИЗ ФОРМЫ
+$channel_limit = isset($_POST['channel_limit']) ? (int)$_POST['channel_limit'] : 5;
+$ring_time = isset($_POST['ring_time']) ? (int)$_POST['ring_time'] : 30;
+$min_success_duration = isset($_POST['min_success_duration']) ? (int)$_POST['min_success_duration'] : 10;
+$max_retries = isset($_POST['max_retries']) ? (int)$_POST['max_retries'] : 1;
+$retry_time = isset($_POST['retry_time']) ? (int)$_POST['retry_time'] : 60;
+
+$start_immediately = isset($_POST['start_immediately']) ? 1 : 0;
+$scheduled_start_time = !empty($_POST['scheduled_start_time']) ? $_POST['scheduled_start_time'] : null;
+$scheduled_pause_time = !empty($_POST['scheduled_pause_time']) ? $_POST['scheduled_pause_time'] : null;
+
+if ($id <= 0 || $trunk_id <= 0) {
+    die("Ошибка: Некорректные данные кампании или транка.");
+}
+
+try {
+    $pdo = db_pdo('dialer');
+    
+    // ДОБАВИЛИ trunk_id = ? В SQL ЗАПРОС
+    $sql = "UPDATE campaigns SET 
+                trunk_id = ?, 
+                channel_limit = ?, 
+                ring_time = ?, 
+                min_success_duration = ?, 
+                max_retries = ?, 
+                retry_time = ?, 
+                start_immediately = ?, 
+                scheduled_start_time = ?, 
+                scheduled_pause_time = ?,
+                updated_at = NOW()
+            WHERE id = ?";
+            
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([
+        $trunk_id, // Передаем ID нового транка в базу
+        $channel_limit,
+        $ring_time,
+        $min_success_duration,
+        $max_retries,
+        $retry_time,
+        $start_immediately,
+        $scheduled_start_time,
+        $scheduled_pause_time,
+        $id
+    ]);
+
+    // Возвращаемся на главную страницу после успешного сохранения
+    header("Location: index.php?success=1");
+    exit;
+
+} catch (PDOException $e) {
+    die("Ошибка сохранения в базу данных: " . $e->getMessage());
+}
+?>

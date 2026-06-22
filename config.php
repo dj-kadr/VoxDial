@@ -8,7 +8,7 @@ $config = [
     'mysql' => [
         'host' => 'localhost',
         'user' => 'root',
-        'pass' => 'IT-Premium',
+        'pass' => 'pass',
         'databases' => [
             'dialer' => 'dialer',
             'asterisk' => 'asterisk',
@@ -20,7 +20,7 @@ $config = [
         'host' => '127.0.0.1',
         'port' => 5038,
         'user' => 'dialer_user',
-        'pass' => 'IT-Premium',
+        'pass' => 'Pass',
         'timeout' => 10,
     ],
     'services' => [

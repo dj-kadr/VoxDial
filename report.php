@@ -118,7 +118,8 @@ function getStatusBadge($status_id) {
                                     $db_status = (int)$lead['status'];
 
                                     if ($db_status !== 0) {
-                                        $unique_accountcode = "dialer-lead-" . (int)$lead['id'];
+                                        $unique_accountcode = "dl-" . (int)$campaign_id . "-" . (int)$lead['id'];
+					//$unique_accountcode = "dialer-lead-" . (int)$lead['id'];
                                         $time_threshold = date('Y-m-d H:i:s', strtotime($lead['updated_at']) - 120);
 
                                         $query = "SELECT disposition, duration, billsec, channel, dstchannel, dst, src 

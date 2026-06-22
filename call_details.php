@@ -20,6 +20,10 @@ switch ($period) {
         $date_start = date('Y-m-d');
         $date_end = date('Y-m-d');
         break;
+    case 'yesterday':
+        $date_start = date('Y-m-d', strtotime('yesterday'));
+        $date_end = date('Y-m-d', strtotime('yesterday'));
+        break;
     case 'week':
         $date_start = date('Y-m-d', strtotime('monday this week'));
         $date_end = date('Y-m-d');
@@ -39,7 +43,7 @@ switch ($period) {
 $sql_start = $date_start . ' 00:00:00';
 $sql_end   = $date_end . ' 23:59:59';
 
-// Генерируем суффикс для ссылок пагинации внутри страницы
+// Gенерируем суффикс для ссылок пагинации внутри страницы
 $url_params = "&type=" . urlencode($type) . "&val=" . urlencode($val) . "&period=" . urlencode($period) . "&date_start=" . urlencode($date_start) . "&date_end=" . urlencode($date_end);
 
 $limit = isset($_GET['limit']) ? (int)$_GET['limit'] : 50;
@@ -60,17 +64,35 @@ try {
         $stmt_count = $pdo_cdr->prepare($count_query);
         $stmt_count->execute(['sql_start' => $sql_start, 'sql_end' => $sql_end, 'q_exact' => $val, 'q_param' => $val . ',%']);
         $total_rows = $stmt_count->fetchColumn();
-
-        $data_query = "
-            SELECT calldate, src, dst, duration, billsec, disposition, dstchannel,
-                   (duration - billsec) as hold_time
-            FROM cdr 
-            WHERE calldate BETWEEN :sql_start AND :sql_end 
-              AND lastapp = 'Queue' 
-              AND (lastdata LIKE :q_exact OR lastdata LIKE :q_param)
-            ORDER BY calldate DESC
-            LIMIT :limit OFFSET :offset
-        ";
+	
+	$data_query = "
+    SELECT a.calldate, a.src, a.dst, a.duration, a.disposition, a.dstchannel,
+           COALESCE((
+               SELECT MAX(c.billsec) 
+               FROM cdr c 
+               WHERE c.linkedid = a.linkedid 
+                 AND c.dcontext = 'from-internal' 
+                 AND c.billsec > 0
+               LIMIT 1
+           ), a.billsec) as billsec,
+           (a.duration - a.billsec) as hold_time
+    FROM cdr a
+    WHERE a.calldate BETWEEN :sql_start AND :sql_end 
+      AND a.lastapp = 'Queue' 
+      AND (a.lastdata LIKE :q_exact OR a.lastdata LIKE :q_param)
+    ORDER BY a.calldate DESC
+    LIMIT :limit OFFSET :offset
+";
+        //$data_query = "
+        //    SELECT calldate, src, dst, duration, billsec, disposition, dstchannel,
+        //           (duration - billsec) as hold_time
+        //    FROM cdr 
+        //    WHERE calldate BETWEEN :sql_start AND :sql_end 
+        //      AND lastapp = 'Queue' 
+        //      AND (lastdata LIKE :q_exact OR lastdata LIKE :q_param)
+        //    ORDER BY calldate DESC
+        //    LIMIT :limit OFFSET :offset
+        //";
         $stmt_data = $pdo_cdr->prepare($data_query);
         $stmt_data->bindValue(':sql_start', $sql_start, PDO::PARAM_STR);
         $stmt_data->bindValue(':sql_end', $sql_end, PDO::PARAM_STR);
@@ -97,8 +119,17 @@ try {
         $stmt_count->execute(['sql_start' => $sql_start, 'sql_end' => $sql_end, 'al1' => $agent_like1, 'al2' => $agent_like2, 'al3' => $agent_like3]);
         $total_rows = $stmt_count->fetchColumn();
 
+        // ИСПРАВЛЕННЫЙ ЗАПРОС: Без разрушающих PHP-строку кириллических комментариев
         $data_query = "
-            SELECT a.calldate, a.src, a.dst, a.duration, a.billsec, a.disposition, a.dstchannel,
+            SELECT a.calldate, a.src, a.dst, a.duration, a.disposition, a.dstchannel,
+                   COALESCE((
+                       SELECT c.billsec 
+                       FROM cdr c 
+                       WHERE c.linkedid = a.linkedid 
+                         AND c.dcontext = 'from-internal' 
+                         AND c.billsec > 0
+                       LIMIT 1
+                   ), a.billsec) as billsec,
                    COALESCE((
                        SELECT (c.duration - c.billsec) 
                        FROM cdr c 

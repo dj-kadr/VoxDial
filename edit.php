@@ -1,11 +1,20 @@
 <?php
-// edit.php — Страница редактирования параметров кампании с поддержкой Планировщика
+// edit.php — Страница редактирования параметров кампании с поддержкой Планировщика и выбором транка
 require_once __DIR__ . '/config.php';
 
 $campaign_id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
 
+$asterisk_trunks = [];
+
 try {
     $pdo = db_pdo('dialer');
+    $pdo_asterisk = db_pdo('asterisk'); // Подключаемся к базе FreePBX для транков
+    
+    // Выгребаем активные транки из Asterisk (как на странице создания)
+    $stmt_trunks = $pdo_asterisk->query("SELECT trunkid, tech, name FROM trunks WHERE disabled = 'off' ORDER BY name ASC");
+    while ($row = $stmt_trunks->fetch(PDO::FETCH_ASSOC)) {
+        $asterisk_trunks[] = $row;
+    }
 } catch (PDOException $e) {
     die("Ошибка подключения к БД: " . $e->getMessage());
 }
@@ -80,8 +89,19 @@ $scheduled_pause_time = !empty($campaign['scheduled_pause_time']) ? substr($camp
 
                     <hr class="my-4">
 
-                    <!-- БЛОК ПАРАМЕТРОВ СКОРОСТИ -->
                     <div class="row g-3 mb-4">
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold text-primary"><i class="fa-solid fa-sim-card me-1"></i>Исходящий номер / Транк</label>
+                            <select name="trunk_id" class="form-select border-primary" required>
+                                <?php foreach ($asterisk_trunks as $trunk): ?>
+                                    <option value="<?= htmlspecialchars($trunk['trunkid']) ?>" <?= (int)$campaign['trunk_id'] === (int)$trunk['trunkid'] ? 'selected' : '' ?>>
+                                        <?= htmlspecialchars($trunk['name']) ?> (<?= htmlspecialchars($trunk['tech']) ?>)
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                            <div class="form-text">Через этот транк провайдера полетят звонки.</div>
+                        </div>
+
                         <div class="col-md-6">
                             <label class="form-label fw-bold text-dark">Лимит каналов (макс. одновременных)</label>
                             <div class="input-group">
@@ -130,7 +150,6 @@ $scheduled_pause_time = !empty($campaign['scheduled_pause_time']) ? substr($camp
 
                     <hr class="my-4">
 
-                    <!-- БЛОК ПЛАНИРОВЩИКА В РЕДАКТИРОВАНИИ -->
                     <div class="card p-3 bg-light border-0">
                         <h5 class="fw-bold mb-3 text-secondary" style="font-size: 1.05rem;"><i class="fa-solid fa-calendar-clock text-info me-2"></i>Планировщик автозапуска и паузы</h5>
                         

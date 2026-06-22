@@ -1,5 +1,5 @@
 <?php
-// stats.php — Аналитика VoxDial с группировкой операторов по сотням (500-е, 600-е, 700-е)
+// stats.php — Аналитика VoxDial с группировкой операторов по сотням и синхронизацией времени разговоров
 require_once __DIR__ . '/config.php';
 
 $agent_stats = [];
@@ -16,6 +16,10 @@ switch ($period) {
     case 'today':
         $date_start = date('Y-m-d');
         $date_end = date('Y-m-d');
+        break;
+    case 'yesterday':
+        $date_start = date('Y-m-d', strtotime('yesterday'));
+        $date_end = date('Y-m-d', strtotime('yesterday'));
         break;
     case 'week':
         $date_start = date('Y-m-d', strtotime('monday this week'));
@@ -56,13 +60,21 @@ try {
         ];
     }
     
-    // Выборка для операторов
+    // Выборка для операторов с интеллектуальным подзапросом времени из from-internal
     $query_agents = "
-        SELECT calldate, dst, dstchannel, duration, billsec, disposition 
-        FROM cdr 
-        WHERE calldate BETWEEN :sql_start AND :sql_end
-          AND lastapp = 'Queue'
-          AND dstchannel LIKE '%/%'
+        SELECT a.calldate, a.dst, a.dstchannel, a.duration, a.disposition,
+               COALESCE((
+                   SELECT c.billsec 
+                   FROM cdr c 
+                   WHERE c.linkedid = a.linkedid 
+                     AND c.dcontext = 'from-internal' 
+                     AND c.billsec > 0
+                   LIMIT 1
+               ), a.billsec) as billsec
+        FROM cdr a
+        WHERE a.calldate BETWEEN :sql_start AND :sql_end
+          AND a.lastapp = 'Queue'
+          AND a.dstchannel LIKE '%/%'
     ";
     
     $stmt_a = $pdo_cdr->prepare($query_agents);
@@ -140,15 +152,13 @@ try {
 }
 
 // =========================================================================
-// 🚀 ЛОГИКА ГРУППИРОВКИ ОПЕРАТОРОВ ПО СОТНЯМ
+// ЛОГИКА ГРУППИРОВКИ ОПЕРАТОРОВ ПО СОТНЯМ
 // =========================================================================
 $grouped_agents = [];
 
 foreach ($agent_stats as $agent_num => $data) {
-    // Определяем "сотню" (например, 507 -> 500, 603 -> 600, 701 -> 700)
     $hundred = floor((int)$agent_num / 100) * 100;
     
-    // Если номера странные/короткие (меньше 100), кидаем в группу 0
     if ($hundred <= 0) {
         $hundred = "Другие";
     }
@@ -156,10 +166,8 @@ foreach ($agent_stats as $agent_num => $data) {
     $grouped_agents[$hundred][$agent_num] = $data;
 }
 
-// Сортируем группы по возрастанию (400, 500, 600, 700)
 ksort($grouped_agents);
 
-// Сортируем операторов внутри каждой группы по количеству принятых вызовов (от большего к меньшему)
 foreach ($grouped_agents as $hundred => &$agents_in_group) {
     uasort($agents_in_group, function($a, $b) {
         return $b['answered'] <=> $a['answered'];
@@ -213,7 +221,7 @@ function formatTime($seconds) {
         <div class="col-md-10 p-4">
             <div class="d-flex justify-content-between align-items-center mb-3">
                 <div>
-                    <h2>Сводный отчет по контакт-центру</h2>
+                    <h2>Сводный отчет по contact-центру</h2>
                     <p class="text-muted mb-0">Данные за период: <span class="badge bg-info text-white fs-6"><?= date('d.m.Y', strtotime($date_start)) ?></span> — <span class="badge bg-info text-white fs-6"><?= date('d.m.Y', strtotime($date_end)) ?></span></p>
                 </div>
             </div>
@@ -224,6 +232,7 @@ function formatTime($seconds) {
                         <label class="form-label small fw-bold text-muted"><i class="fa-regular fa-calendar-list me-1"></i>Выберите период</label>
                         <select name="period" id="periodSelect" class="form-select form-select-sm">
                             <option value="today" <?= $period == 'today' ? 'selected' : '' ?>>Сегодня</option>
+                            <option value="yesterday" <?= $period == 'yesterday' ? 'selected' : '' ?>>Вчера</option>
                             <option value="week" <?= $period == 'week' ? 'selected' : '' ?>>Эта неделя</option>
                             <option value="month" <?= $period == 'month' ? 'selected' : '' ?>>Этот месяц</option>
                             <option value="last_month" <?= $period == 'last_month' ? 'selected' : '' ?>>Прошлый месяц</option>
@@ -294,7 +303,20 @@ function formatTime($seconds) {
             </div>
 
             <div class="card p-4">
-                <h5 class="table-title mb-3"><i class="fa-solid fa-user-gear text-info me-2"></i> 2. Персональная эффективность операторов</h5>
+                <h5 class="table-title mb-3"><i class="fa-solid fa-user-gear text-info me-2"></i> 2. Персональная
+
+
+
+
+
+
+
+
+
+
+
+
+ эффективность операторов</h5>
                 <div class="table-responsive">
                     <table class="table table-hover align-middle border">
                         <thead class="table-light">

@@ -1,5 +1,5 @@
 <?php
-// index.php — Главная панель управления (Дашборд) с точной синхронизацией CDR, статусом службы и Стоп-листом
+// index.php — Главная панель управления (Дашборд) с правильной иерархией статусов CDR и кнопкой редиала
 require_once __DIR__ . '/config.php';
 
 header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
@@ -8,7 +8,7 @@ header('Pragma: no-cache');
 header('Expires: 0');
 
 try {
-    $pdo = db_pdo('dialer'); // Используем твои родные функции конфигурации
+    $pdo = db_pdo('dialer'); 
     $pdo_cdr = db_pdo('cdr');
 } catch (PDOException $e) {
     die("Ошибка подключения к БД: " . $e->getMessage());
@@ -18,7 +18,6 @@ try {
 $service_status_raw = shell_exec("systemctl is-active " . escapeshellarg(app_config('services.dialer')) . " 2>&1");
 $service_status = trim($service_status_raw);
 
-// Переменные для вывода бейджа службы
 if ($service_status === 'active') {
     $service_badge = '<span class="badge bg-success fs-6 px-3 py-2"><i class="fa-solid fa-circle-check me-1"></i> Запущена (Active)</span>';
 } else {
@@ -31,19 +30,17 @@ $campaigns_raw = $pdo->query($query_c)->fetchAll(PDO::FETCH_ASSOC);
 
 $campaigns = [];
 $global_total_success = 0;
-$running_campaigns_count = 0; // Счетчик запущенных кампаний
+$running_campaigns_count = 0; 
 
 // ПЕРЕБИРАЕМ КАМПАНИИ И СЧИТАЕМ СТАТИСТИКУ
 foreach ($campaigns_raw as $c) {
     $campaign_id = (int)$c['id'];
     $min_dur = (int)$c['min_success_duration'];
 
-    // Если у кампании статус "Активна" (1), увеличиваем счетчик запущенных
     if ((int)$c['status'] === 1) {
         $running_campaigns_count++;
     }
 
-    // Загружаем лиды для этой кампании
     $stmt_l = $pdo->prepare("SELECT id, status, updated_at FROM leads WHERE campaign_id = ?");
     $stmt_l->execute([$campaign_id]);
     $leads = $stmt_l->fetchAll(PDO::FETCH_ASSOC);
@@ -62,7 +59,8 @@ foreach ($campaigns_raw as $c) {
         'no_answer' => 0,
         'error' => 0,
         'resp_drop' => 0,
-        'blacklisted' => 0 // Новое поле Стоп-листа
+        'blacklisted' => 0,
+        'failed_network' => 0 
     ];
 
     foreach ($leads as $lead) {
@@ -73,42 +71,29 @@ foreach ($campaigns_raw as $c) {
             continue;
         }
 
-        $unique_accountcode = "dialer-lead-" . (int)$lead['id'];
-        $time_threshold = date('Y-m-d H:i:s', strtotime($lead['updated_at']) - 120);
+        $unique_accountcode = "dl-" . $campaign_id . "-" . (int)$lead['id'];
 
-        // КРИТИЧЕСКИЙ ТРИГГЕР: Если статус равен 5, проверяем наличие записи в Asterisk CDR
-        if ($db_status === 5) {
-            $query_check = "SELECT COUNT(*) FROM asteriskcdrdb.cdr WHERE accountcode = :accountcode AND calldate >= :time_threshold";
-            $stmt_check = $pdo_cdr->prepare($query_check);
-            $stmt_check->execute(['accountcode' => $unique_accountcode, 'time_threshold' => $time_threshold]);
-            $cdr_exists = (int)$stmt_check->fetchColumn();
-
-            if ($cdr_exists === 0) {
-                // В CDR пусто, а статус 5 — лид отфильтрован Стоп-листом до вызова
-                $stats['blacklisted']++;
-                continue;
-            }
-        }
-
-        $query_cdr = "SELECT disposition, duration, billsec FROM asteriskcdrdb.cdr 
-                      WHERE accountcode = :accountcode AND calldate >= :time_threshold";
+        // 1. ЗАПРОС К CDR БЕЗ ПРЕДВЗЯТОСТИ К СТАТУСУ 5 (Иерархический анализ мульти-строк)
+        $query_cdr = "SELECT disposition, MAX(duration) as duration, MAX(billsec) as billsec 
+                      FROM asteriskcdrdb.cdr 
+                      WHERE accountcode = :accountcode
+                      GROUP BY accountcode, disposition";
+                      
         $stmt_cdr = $pdo_cdr->prepare($query_cdr);
-        $stmt_cdr->execute(['accountcode' => $unique_accountcode, 'time_threshold' => $time_threshold]);
+        $stmt_cdr->execute(['accountcode' => $unique_accountcode]);
         $rows = $stmt_cdr->fetchAll(PDO::FETCH_ASSOC);
 
         if (!empty($rows)) {
             $has_answered = false;
             $has_busy = false;
             $has_no_answer = false;
+            $has_failed = false;
+
             $max_billsec = 0;
-            $max_duration = 0;
 
             foreach ($rows as $row) {
                 $disp = strtoupper(trim($row['disposition']));
                 $billsec = (int)$row['billsec'];
-                $duration = (int)$row['duration'];
-
-                if ($duration > $max_duration) $max_duration = $duration;
 
                 if ($disp === 'ANSWERED') {
                     $has_answered = true;
@@ -116,28 +101,38 @@ foreach ($campaigns_raw as $c) {
                 }
                 if ($disp === 'BUSY') $has_busy = true;
                 if ($disp === 'NO ANSWER') $has_no_answer = true;
+                if ($disp === 'FAILED' || $disp === 'CONGESTION') $has_failed = true;
             }
 
+            // 2. ЖЕСТКАЯ ИЕРАРХИЯ РАСПРЕДЕЛЕНИЯ: ANSWERED всегда бьет любые ошибки!
             if ($has_answered) {
                 if ($max_billsec >= $min_dur) {
                     $stats['success']++;
                     $global_total_success++;
                 } else {
-                    $stats['resp_drop']++;
+                    $stats['resp_drop']++; 
                 }
+            } elseif ($has_busy) {
+                $stats['busy']++; 
+            } elseif ($has_no_answer) {
+                $stats['no_answer']++; 
             } else {
-                if ($has_busy) {
+                // Если зафиксированы только сбои сети и робот пометил лид как финальный сбой (5)
+                if ($has_failed && $db_status === 5) {
+                    $stats['failed_network']++;
+                } else {
                     $stats['error']++; 
-                } elseif ($has_no_answer) {
-                    if ($max_duration >= 25) {
-                        $stats['busy']++; 
-                    } else {
-                        $stats['no_answer']++; 
-                    }
                 }
             }
         } else {
-            $stats['no_answer']++;
+            // 3. Если вызовов в CDR вообще нет, распределяем строго по статусу нашей БД
+            if ($db_status === 5) {
+                $stats['blacklisted']++; 
+            } elseif ($db_status === 3) {
+                $stats['busy']++;
+            } else {
+                $stats['no_answer']++;
+            }
         }
     }
 
@@ -192,7 +187,6 @@ $total_campaigns = count($campaigns);
     </div>
     	<a href="create.php" class="btn btn-info text-white fw-bold"><i class="fa-solid fa-plus me-2"></i>Новая кампания</a>
 	</div>           
- 
 
             <div class="row mb-4 g-3">
                 <div class="col-md-3">
@@ -257,7 +251,7 @@ $total_campaigns = count($campaigns);
                                 </td>
                                 <td>
                                     <?php if ($c['status'] == 1): ?>
-                                        <span class="badge bg-success status-badge"><i class="fa-solid fa-play me-1"></i> Активна</span>
+                                        <span class="badge bg-success status-badge"><i class="fa-solid fa-play me-1"></i> : Активна</span>
                                     <?php elseif ($c['status'] == 2): ?>
                                         <span class="badge bg-dark status-badge"><i class="fa-solid fa-check-double me-1"></i> Завершена</span>
                                     <?php else: ?>
@@ -277,14 +271,16 @@ $total_campaigns = count($campaigns);
                                     <span class="text-success fw-bold me-2" title="Успешно"><i class="fa-solid fa-circle-check"></i> <?= (int)$c['success'] ?></span>
                                     <span class="text-warning fw-bold me-2" title="Занято"><i class="fa-solid fa-circle-minus"></i> <?= (int)$c['busy'] ?></span>
                                     <span class="text-danger fw-bold me-2" title="Нет ответа"><i class="fa-solid fa-circle-xmark"></i> <?= (int)$c['no_answer'] ?></span>
-                                    <span class="text-dark fw-bold me-2" title="Сбой / Сброс"><i class="fa-solid fa-triangle-exclamation"></i> <?= (int)$c['error'] ?></span>
-                                    <span class="text-danger-emphasis fw-bold me-2" title="Отвечен/Сброс (Короткий)"><i class="fa-solid fa-phone-slash"></i> <?= (int)$c['resp_drop'] ?></span>
-                                    <span class="text-danger fw-bold" title="Пропущено по Стоп-листу" style="color: #dc3545 !important;"><i class="fa-solid fa-user-slash"></i> <?= (int)$c['blacklisted'] ?></span>
+                                    <span class="text-dark fw-bold me-2" title="Сбой / Ошибка линии"><i class="fa-solid fa-phone-slash"></i> <?= (int)$c['error'] ?></span>
+                                    <span class="text-danger-emphasis fw-bold me-2" title="Отвечен/Сброс (Короткий)"><i class="fa-solid fa-handset-slash"></i> <?= (int)$c['resp_drop'] ?></span>
+                                    <span class="text-danger fw-bold me-2" title="Пропущено по Стоп-листу" style="color: #dc3545 !important;"><i class="fa-solid fa-user-slash"></i> <?= (int)$c['blacklisted'] ?></span>
+                                    <span class="text-warning-emphasis fw-bold" title="Технические сбои сети (FAILED / CONGESTION)" style="color: #fd7e14 !important;"><i class="fa-solid fa-triangle-exclamation"></i> <?= (int)$c['failed_network'] ?></span>
                                 </td>
                                 <td>
                                     <div class="btn-group btn-group-sm">
                                         <a href="report.php?id=<?= $c['id'] ?>" class="btn btn-outline-info" title="Детализация звонков"><i class="fa-solid fa-list-numeric"></i></a>
                                         <a href="edit.php?id=<?= $c['id'] ?>" class="btn btn-outline-primary" title="Редактировать параметры"><i class="fa-solid fa-pencil"></i></a>
+                                        <a href="redial_failed.php?id=<?= $c['id'] ?>" class="btn btn-outline-warning text-dark" onclick="return confirm('Создать новую кампанию с суффиксом R и скопировать туда все сбои сети?')" title="Повторный обзвон технических сбоев"><i class="fa-solid fa-arrows-spin"></i></a>
                                         <?php if ($c['status'] == 1): ?>
                                             <a href="action.php?id=<?= $c['id'] ?>&act=pause" class="btn btn-outline-warning" title="Поставить на паузу"><i class="fa-solid fa-pause"></i></a>
                                         <?php else: ?>
